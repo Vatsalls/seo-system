@@ -504,7 +504,7 @@ const ALLOWED_ADMINS = [
 const ALLOWED_USERS = [
   "vatsal.assetscout@gmail.com",
   "rushikeshpote14@gmail.com",
-
+  "kavita.assetscout@gmail.com"
 ];
 
 // ==========================================
