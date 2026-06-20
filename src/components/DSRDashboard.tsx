@@ -96,6 +96,7 @@ export default function DSRDashboard({
   }, [heatmapYear, heatmapMonth]);
 
   // Filter states
+  const [showRoster, setShowRoster] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const [projectSearchTerm, setProjectSearchTerm] = useState('');
@@ -1321,6 +1322,37 @@ export default function DSRDashboard({
         </div>
       </div>
 
+      {/* Authorized Workspace Logins & Rosters (Only shown to Administrators) */}
+      {isAdmin && (
+        <div className="bg-white p-5 rounded-2xl border border-gray-150 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between cursor-pointer select-none" onClick={() => setShowRoster(!showRoster)}>
+            <div className="flex items-center gap-2">
+              <Users className="text-indigo-600 shrink-0" size={14} />
+              <span className="text-xs font-black text-gray-900 uppercase tracking-widest leading-none">Authorized Account Logins & Rosters ({allUsersList.length})</span>
+            </div>
+            <button className="text-[10px] font-black text-indigo-650 hover:text-indigo-850 bg-indigo-50/60 px-2.5 py-1 rounded-lg transition-all border border-indigo-100/40">
+              {showRoster ? 'Collapse Roster [-]' : 'Expand Roster [+]'}
+            </button>
+          </div>
+          
+          {showRoster && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2 animate-fade-in text-left">
+              {allUsersList.map((user) => {
+                return (
+                  <div key={user.email} className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex items-center justify-between text-xs hover:border-slate-300 hover:bg-slate-100/40 transition">
+                    <div className="space-y-0.5">
+                      <div className="font-extrabold text-gray-950 flex items-center gap-1.5">
+                        {user.name}
+                      </div>
+                      <div className="text-[10px] text-gray-500 font-mono">{user.email}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
 
       {/* 5 Horizontal Buttons Tab Selection Bar - Premium, Larger & Highly Professional */}
