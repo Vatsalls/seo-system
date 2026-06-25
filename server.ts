@@ -1571,6 +1571,314 @@ app.get("/api/activity", async (req, res) => {
   }
 });
 
+const syncRankings = async (auth: any, spreadsheetId: string): Promise<Record<string, Record<string, { ranking: string; lastChecked: string }>>> => {
+  const sheetName = "Keyword_Rankings";
+  try {
+    if (!auth || !spreadsheetId) {
+      return readRankings();
+    }
+
+    if (!auth.isApiKey) {
+      await ensureSheetExists(auth.token, spreadsheetId, sheetName);
+    }
+
+    const range = encodeURIComponent(`${sheetName}!A2:D1000`);
+    const url = auth.isApiKey
+      ? `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?key=${auth.token}`
+      : `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
+
+    const res = await fetch(url, {
+      headers: auth.isApiKey ? {} : { Authorization: `Bearer ${auth.token}` }
+    });
+
+    if (res.ok) {
+      const data: any = await res.json();
+      const rows = data.values || [];
+      const rankingsObj: Record<string, Record<string, { ranking: string; lastChecked: string }>> = {};
+      
+      for (const r of rows) {
+        const projectId = r[0] || "";
+        const keyword = r[1] || "";
+        const ranking = r[2] || "NA";
+        const lastChecked = r[3] || new Date().toISOString();
+        if (!projectId || !keyword) continue;
+        
+        if (!rankingsObj[projectId]) {
+          rankingsObj[projectId] = {};
+        }
+        rankingsObj[projectId][keyword] = { ranking, lastChecked };
+      }
+
+      writeRankings(rankingsObj);
+      return rankingsObj;
+    } else {
+      console.warn(`Failed to fetch rankings from sheet. Status ${res.status}. Using local cache.`);
+    }
+  } catch (err) {
+    console.error("Failed syncing rankings from sheet:", err);
+  }
+  return readRankings();
+};
+
+const writeAllRankingsToSheet = async (token: string, spreadsheetId: string, rankings: Record<string, Record<string, { ranking: string; lastChecked: string }>>) => {
+  const sheetName = "Keyword_Rankings";
+  try {
+    await ensureSheetExists(token, spreadsheetId, sheetName);
+    const headers = ["Project ID", "Keyword", "Ranking", "Last Checked"];
+    const rows = [headers];
+    
+    for (const [projectId, keywordsObj] of Object.entries(rankings)) {
+      for (const [keyword, val] of Object.entries(keywordsObj)) {
+        rows.push([
+          projectId,
+          keyword,
+          val.ranking || "NA",
+          val.lastChecked || new Date().toISOString()
+        ]);
+      }
+    }
+
+    const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`${sheetName}!A1:D1000`)}:clear`;
+    await fetch(clearUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`${sheetName}!A1`)}?valueInputOption=USER_ENTERED`;
+    await fetch(url, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ values: rows })
+    });
+    console.log("Keyword rankings synced to Google Sheets successfully.");
+  } catch (err) {
+    console.error("Failed writing rankings to sheet:", err);
+  }
+};
+
+// =========================================================================
+// SERP RANKING INTEGRATION ENDPOINTS (0 Cost API check via user's SERP API Key)
+// =========================================================================
+const RANKINGS_FALLBACK_FILE = path.join(DB_DIR, "rankings_fallback.json");
+
+const readRankings = (): Record<string, Record<string, { ranking: string; lastChecked: string }>> => {
+  if (fs.existsSync(RANKINGS_FALLBACK_FILE)) {
+    try {
+      return JSON.parse(fs.readFileSync(RANKINGS_FALLBACK_FILE, "utf-8"));
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+
+const writeRankings = (rankings: Record<string, Record<string, { ranking: string; lastChecked: string }>>) => {
+  try {
+    fs.writeFileSync(RANKINGS_FALLBACK_FILE, JSON.stringify(rankings, null, 2));
+  } catch (err) {
+    console.error("Failed to write rankings file:", err);
+  }
+};
+
+async function checkSerpRanking(keyword: string, domain: string): Promise<string> {
+  const apiKey = (process.env.SERP_API_KEY || "").trim();
+  let apiUrl = (process.env.SERP_API_URL || "https://serpapi.com/search.json").trim();
+
+  if (!apiKey) {
+    console.warn("⚠️ SERP_API_KEY is not configured in environment.");
+    return "NA";
+  }
+
+  // Intelligently normalize popular SERP provider URLs if the user entered base domain/site URL
+  if (apiUrl.includes("serpapi.com") && !apiUrl.includes("/search")) {
+    apiUrl = "https://serpapi.com/search.json";
+  } else if (apiUrl.includes("valueserp.com") && !apiUrl.includes("/search")) {
+    apiUrl = "https://api.valueserp.com/search";
+  } else if (apiUrl.includes("scaleserp.com") && !apiUrl.includes("/search")) {
+    apiUrl = "https://api.scaleserp.com/search";
+  } else if (apiUrl.includes("searchapi.io") && !apiUrl.includes("/api/v1/search")) {
+    apiUrl = "https://www.searchapi.io/api/v1/search";
+  } else if (apiUrl.includes("serpstack.com") && !apiUrl.includes("/search")) {
+    apiUrl = "http://api.serpstack.com/search";
+  }
+
+  if (!apiUrl.startsWith("http://") && !apiUrl.startsWith("https://")) {
+    console.warn(`⚠️ SERP_API_URL "${apiUrl}" is not a valid absolute URL. Defaulting to https://serpapi.com/search.json`);
+    apiUrl = "https://serpapi.com/search.json";
+  }
+
+  try {
+    const cleanDomain = domain.toLowerCase().replace(/^(https?:\/\/)?(www\.)?/, "").split('/')[0].trim();
+    let fetchUrl = "";
+    
+    // Construct search URL with 10 pages crawling (num=100) and India region (gl=in, hl=en)
+    if (apiUrl.includes("serpapi.com")) {
+      fetchUrl = `${apiUrl}?q=${encodeURIComponent(keyword)}&api_key=${apiKey}&engine=google&num=100&gl=in&hl=en`;
+    } else if (apiUrl.includes("valueserp.com") || apiUrl.includes("scaleserp.com")) {
+      fetchUrl = `${apiUrl}?q=${encodeURIComponent(keyword)}&api_key=${apiKey}&num=100&gl=in&hl=en`;
+    } else if (apiUrl.includes("searchapi.io")) {
+      fetchUrl = `${apiUrl}?q=${encodeURIComponent(keyword)}&api_key=${apiKey}&engine=google&num=100&gl=in&hl=en`;
+    } else if (apiUrl.includes("serpstack.com")) {
+      fetchUrl = `${apiUrl}?query=${encodeURIComponent(keyword)}&access_key=${apiKey}&num=100&gl=in&hl=en`;
+    } else {
+      const separator = apiUrl.includes("?") ? "&" : "?";
+      fetchUrl = `${apiUrl}${separator}q=${encodeURIComponent(keyword)}&api_key=${apiKey}&key=${apiKey}&query=${encodeURIComponent(keyword)}&num=100&gl=in&hl=en`;
+    }
+
+    const redactedUrl = fetchUrl.replace(apiKey, "[REDACTED_API_KEY]");
+    console.log(`Fetching SERP ranking for: keyword="${keyword}", domain="${cleanDomain}", URL="${redactedUrl}"`);
+
+    const response = await fetch(fetchUrl, {
+      method: "GET",
+      headers: {
+        "Accept": "application/json"
+      }
+    });
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      console.error(`SERP API returned status ${response.status} for URL "${redactedUrl}": ${responseText.slice(0, 500)}`);
+      return "NA";
+    }
+
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseErr) {
+      console.error(`Failed to parse SERP API response as JSON for URL "${redactedUrl}". Response starts with:`, responseText.slice(0, 500));
+      return "NA";
+    }
+
+    // Try to locate organic results array
+    const results = data.organic_results || data.organic || data.results || [];
+    
+    if (!Array.isArray(results) || results.length === 0) {
+      console.warn("No organic results found in SERP response");
+      return "NA";
+    }
+
+    // Loop through up to 100 results (10 pages)
+    for (let i = 0; i < results.length; i++) {
+      const item = results[i];
+      const link = item.link || item.url || item.formatted_url || "";
+      if (link && link.toLowerCase().includes(cleanDomain)) {
+        const position = item.position !== undefined ? String(item.position) : String(i + 1);
+        return position;
+      }
+    }
+
+    return "100+";
+  } catch (err) {
+    console.error("Error fetching ranking from SERP API:", err);
+    return "NA";
+  }
+}
+
+// GET rankings endpoint
+app.get("/api/rankings", async (req, res) => {
+  try {
+    const auth = await getGoogleAuth(req);
+    const spreadsheetId = getSpreadsheetId(req, 'logs');
+    if (auth && spreadsheetId) {
+      const rankings = await syncRankings(auth, spreadsheetId);
+      return res.json(rankings);
+    }
+    const rankings = readRankings();
+    res.json(rankings);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST check rankings endpoint
+app.post("/api/rankings/check", async (req, res) => {
+  const { projectId, keyword, domain } = req.body;
+  if (!projectId || !domain) {
+    return res.status(400).json({ error: "projectId and domain are required." });
+  }
+
+  const rankings = readRankings();
+  if (!rankings[projectId]) {
+    rankings[projectId] = {};
+  }
+
+  const timestamp = new Date().toISOString();
+
+  if (keyword) {
+    // Check single keyword
+    const rank = await checkSerpRanking(keyword, domain);
+    rankings[projectId][keyword] = {
+      ranking: rank,
+      lastChecked: timestamp
+    };
+    writeRankings(rankings);
+
+    // Save to Google Sheets if auth available
+    try {
+      const auth = await getGoogleAuth(req);
+      const spreadsheetId = getSpreadsheetId(req, 'logs');
+      if (auth && spreadsheetId && !auth.isApiKey) {
+        await writeAllRankingsToSheet(auth.token, spreadsheetId, rankings);
+      }
+    } catch (e) {
+      console.error("Error writing single keyword ranking to Google Sheets:", e);
+    }
+
+    return res.json({ projectId, keyword, ranking: rankings[projectId][keyword] });
+  } else {
+    // Check all keywords for the project
+    let projectKeywords: string[] = [];
+    try {
+      const projectsFile = path.join(DB_DIR, "projects_fallback.json");
+      if (fs.existsSync(projectsFile)) {
+        const projs = JSON.parse(fs.readFileSync(projectsFile, "utf-8"));
+        const found = projs.find((p: any) => p.id === projectId);
+        if (found && found.keywords) {
+          projectKeywords = found.keywords;
+        }
+      }
+    } catch (e) {
+      console.error("Error loading project keywords for checking all:", e);
+    }
+
+    if (projectKeywords.length === 0) {
+      return res.status(404).json({ error: "No keywords found or mapped for this project." });
+    }
+
+    const results: Record<string, { ranking: string; lastChecked: string }> = {};
+    for (const kw of projectKeywords) {
+      if (kw && kw.trim()) {
+        const rank = await checkSerpRanking(kw, domain);
+        rankings[projectId][kw] = {
+          ranking: rank,
+          lastChecked: timestamp
+        };
+        results[kw] = rankings[projectId][kw];
+      }
+    }
+
+    writeRankings(rankings);
+
+    // Save to Google Sheets if auth available
+    try {
+      const auth = await getGoogleAuth(req);
+      const spreadsheetId = getSpreadsheetId(req, 'logs');
+      if (auth && spreadsheetId && !auth.isApiKey) {
+        await writeAllRankingsToSheet(auth.token, spreadsheetId, rankings);
+      }
+    } catch (e) {
+      console.error("Error writing all project keyword rankings to Google Sheets:", e);
+    }
+
+    return res.json({ projectId, results });
+  }
+});
+
+
 // ==========================================
 // STATIC FRONTEND SERVING & VITE
 // ==========================================

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { DSREntry, Project, AppUser, ProjectLocation, CustomSubmissionType } from '../types';
 import { getUserDisplayName, isUserAdmin } from '../lib/userUtils';
 import { 
@@ -134,6 +134,26 @@ export default function DSRDashboard({
   // Project backlinks cell expand state (for clicking on the backlinks count)
   const [expandedProjectStats, setExpandedProjectStats] = useState<Record<string, boolean>>({});
   const [expandedRankingProjects, setExpandedRankingProjects] = useState<Record<string, boolean>>({});
+
+  // SERP Live Keyword Rankings Integration States
+  const [rankings, setRankings] = useState<Record<string, Record<string, { ranking: string; lastChecked: string }>>>({});
+  const [checkingProjectIds, setCheckingProjectIds] = useState<string[]>([]);
+  const [checkingKeywords, setCheckingKeywords] = useState<string[]>([]); // "projectId_keyword"
+
+  useEffect(() => {
+    const fetchRankings = async () => {
+      try {
+        const res = await fetch('/api/rankings');
+        if (res.ok) {
+          const data = await res.json();
+          setRankings(data);
+        }
+      } catch (e) {
+        console.error('Failed to load rankings:', e);
+      }
+    };
+    fetchRankings();
+  }, []);
 
   // Employee lookup details
   const employeeEmailToNameMap = useMemo(() => {
@@ -976,11 +996,18 @@ export default function DSRDashboard({
           }
         });
         
+        // Retrieve live ranking from our SERP state
+        const projRankings = rankings[proj.id] || {};
+        const kwRankObj = projRankings[kw];
+        const ranking = kwRankObj ? kwRankObj.ranking : '—';
+        const rankingLastChecked = kwRankObj ? kwRankObj.lastChecked : null;
+        
         return {
           keyword: kw,
           domain: proj.domain || '',
           timesWorked,
-          ranking: '—',
+          ranking,
+          lastChecked: rankingLastChecked,
           lastWorked
         };
       });
@@ -1003,7 +1030,7 @@ export default function DSRDashboard({
         keywords: keywordItems
       };
     });
-  }, [filteredProjectsForMetrics, filteredWorks]);
+  }, [filteredProjectsForMetrics, filteredWorks, rankings]);
 
   const filteredProjectKeywordGroups = useMemo(() => {
     let result = projectKeywordGroups;
@@ -2696,23 +2723,63 @@ export default function DSRDashboard({
                             </td>
 
                             {/* Last Check (Last Worked Date) */}
-                            <td className="px-4 py-3.5">
-                              {(() => {
-                                if (proj.lastWorkedDate === 'Never') {
-                                  return <span className="text-gray-400 font-bold font-mono">—</span>;
-                                }
-                                
-                                try {
-                                  const d = new Date(proj.lastWorkedDate);
-                                  return (
-                                    <span className="text-gray-800 font-extrabold font-mono text-xs">
-                                      {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                                    </span>
-                                  );
-                                } catch {
-                                  return <span className="text-gray-800 font-extrabold font-mono text-xs">{proj.lastWorkedDate}</span>;
-                                }
-                              })()}
+                            <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="text-gray-800 font-extrabold font-mono text-xs">
+                                  {(() => {
+                                    if (proj.lastWorkedDate === 'Never') {
+                                      return <span className="text-gray-400 font-bold font-mono">—</span>;
+                                    }
+                                    
+                                    try {
+                                      const d = new Date(proj.lastWorkedDate);
+                                      return (
+                                        <span>
+                                          {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                        </span>
+                                      );
+                                    } catch {
+                                      return <span>{proj.lastWorkedDate}</span>;
+                                    }
+                                  })()}
+                                </div>
+                                 {isAdmin && (
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      if (checkingProjectIds.includes(proj.id)) return;
+                                      setCheckingProjectIds(prev => [...prev, proj.id]);
+                                      try {
+                                        const res = await fetch('/api/rankings/check', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ projectId: proj.id, domain: proj.domain })
+                                        });
+                                        if (res.ok) {
+                                          const resRankings = await fetch('/api/rankings');
+                                          if (resRankings.ok) {
+                                            const data = await resRankings.json();
+                                            setRankings(data);
+                                          }
+                                        }
+                                      } catch (err) {
+                                        console.error('Error checking project rankings:', err);
+                                      } finally {
+                                        setCheckingProjectIds(prev => prev.filter(id => id !== proj.id));
+                                      }
+                                    }}
+                                    disabled={checkingProjectIds.includes(proj.id)}
+                                    className="inline-flex items-center gap-1 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed text-amber-800 font-black uppercase text-[10px] px-2 py-1 rounded border border-amber-200 transition shadow-3xs cursor-pointer"
+                                    title="Check all keywords ranking live on Google SERP"
+                                  >
+                                    {checkingProjectIds.includes(proj.id) ? (
+                                      <span className="inline-block animate-spin mr-0.5">⏳</span>
+                                    ) : (
+                                      <span>🔍 Check</span>
+                                    )}
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
 
@@ -2779,7 +2846,53 @@ export default function DSRDashboard({
 
                                               {/* Ranking */}
                                               <td className="px-3 py-2.5 text-gray-550 font-mono text-xs font-bold">
-                                                {kwItem.ranking}
+                                                <div className="flex items-center gap-2">
+                                                  <span className="text-gray-900 bg-slate-100 px-1.5 py-0.5 rounded font-black text-xs min-w-[20px] text-center">
+                                                    {kwItem.ranking}
+                                                  </span>
+                                                  {isAdmin && (
+                                                    <button
+                                                      onClick={async (e) => {
+                                                        e.stopPropagation();
+                                                        const keyId = `${proj.id}_${kwItem.keyword}`;
+                                                        if (checkingKeywords.includes(keyId)) return;
+                                                        setCheckingKeywords(prev => [...prev, keyId]);
+                                                        try {
+                                                          const res = await fetch('/api/rankings/check', {
+                                                            method: 'POST',
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({ projectId: proj.id, keyword: kwItem.keyword, domain: proj.domain })
+                                                          });
+                                                          if (res.ok) {
+                                                            const resRankings = await fetch('/api/rankings');
+                                                            if (resRankings.ok) {
+                                                              const data = await resRankings.json();
+                                                              setRankings(data);
+                                                            }
+                                                          }
+                                                        } catch (err) {
+                                                          console.error('Error checking keyword ranking:', err);
+                                                        } finally {
+                                                          setCheckingKeywords(prev => prev.filter(k => k !== keyId));
+                                                        }
+                                                      }}
+                                                      disabled={checkingKeywords.includes(`${proj.id}_${kwItem.keyword}`)}
+                                                      className="p-1 text-gray-400 hover:text-amber-600 hover:bg-amber-50 disabled:opacity-50 disabled:cursor-not-allowed bg-slate-50 border border-slate-200/50 hover:border-amber-200 rounded transition cursor-pointer"
+                                                      title={kwItem.lastChecked ? `Last Checked: ${new Date(kwItem.lastChecked).toLocaleString()}\nClick to refresh live SERP ranking` : "Click to check live SERP ranking"}
+                                                    >
+                                                      {checkingKeywords.includes(`${proj.id}_${kwItem.keyword}`) ? (
+                                                        <span className="inline-block animate-spin text-[9px]">⏳</span>
+                                                      ) : (
+                                                        <span className="text-[9px]">🔍</span>
+                                                      )}
+                                                    </button>
+                                                  )}
+                                                  {kwItem.lastChecked && (
+                                                    <span className="text-[9px] text-gray-400 font-normal hidden md:inline" title={new Date(kwItem.lastChecked).toLocaleString()}>
+                                                      ({new Date(kwItem.lastChecked).toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' })})
+                                                    </span>
+                                                  )}
+                                                </div>
                                               </td>
 
                                               {/* Last Worked */}

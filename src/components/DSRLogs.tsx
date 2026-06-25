@@ -579,10 +579,6 @@ export default function DSRLogs({
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="text-xs text-slate-400 font-extrabold tracking-wider uppercase flex items-center justify-between">
-            <span>SHOWING {flatLogs.length} LOGS FROM DATABASE</span>
-          </div>
-
           <div className="grid grid-cols-1 gap-3.5">
             {flatLogs.map((item) => {
               const parsedFilledDate = new Date(item.filledForDate);
@@ -813,9 +809,12 @@ export default function DSRLogs({
                                 <div className="mt-3.5 pt-3 border-t border-slate-150 flex flex-wrap items-center gap-2">
                                   <span className="text-[9.5px] font-black text-slate-405 uppercase tracking-wide font-sans">Target Keywords:</span>
                                   <div className="flex flex-wrap gap-1.5">
-                                    {((item.selectedKeywords || item.customValues?.selectedKeywords || []) as string[]).map((kw: string) => (
-                                      <span key={kw} className="bg-amber-100/50 border border-amber-205 text-amber-900 px-2 py-0.5 rounded-md font-sans text-[10px] font-black">
-                                        #{kw}
+                                    {(((item.selectedKeywords || item.customValues?.selectedKeywords || []) as string[]).filter(Boolean)).map((kw: string, idx: number) => (
+                                      <span key={kw} className="bg-amber-100/50 border border-amber-205 text-amber-900 px-2 py-0.5 rounded-md font-sans text-[10px] font-black flex items-center gap-1.5">
+                                        <span className="bg-amber-500 text-white w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-bold shrink-0 font-mono leading-none">
+                                          {idx + 1}
+                                        </span>
+                                        {kw}
                                       </span>
                                     ))}
                                   </div>
@@ -855,17 +854,6 @@ export default function DSRLogs({
                                   }`}
                                 >
                                   ✓ Approve Task
-                                </button>
-                                
-                                <button
-                                  onClick={() => onUpdateStatus(item.entryId, 'Needs Revision')}
-                                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition cursor-pointer select-none font-sans ${
-                                    item.status === 'Needs Revision'
-                                      ? 'bg-rose-600 text-white shadow-xs'
-                                      : 'bg-rose-50 text-rose-800 hover:bg-rose-100/8 border border-rose-100'
-                                  }`}
-                                >
-                                  ⚠ Require Revision
                                 </button>
                               </div>
                             )}
