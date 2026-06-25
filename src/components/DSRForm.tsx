@@ -198,6 +198,12 @@ export default function DSRForm({
       return;
     }
 
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (selectedDate > todayStr) {
+      setValidationError('You are not allowed to submit a log for a future date. Only current or previous days are permitted.');
+      return;
+    }
+
     // Validate the work entry
     const work = worksList[0];
     if (!work.projectId) {
@@ -348,39 +354,8 @@ export default function DSRForm({
       ) : (
         <>
           <form onSubmit={handleSubmit} className="space-y-8">
-            {/* Date Selector Row */}
-            <div className="bg-white p-6 rounded-2xl border border-gray-150 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-6">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-extrabold text-gray-950 text-base flex items-center gap-2">
-                    <Calendar size={18} className="text-indigo-600 animate-pulse" />
-                    Reporting Period Date
-                  </h3>
-                  <span className="text-[9px] font-black tracking-wide text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 uppercase uppercase-sans">
-                    Any Date Allowed
-                  </span>
-                </div>
-
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="reporting-date"
-                  type="date"
-                  required
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-955 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-600 transition text-sm cursor-pointer hover:bg-gray-100"
-                />
-              </div>
-            </div>
-
             {/* Single Project Work Item Container */}
             <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">
-                  Domain Allocation
-                </span>
-              </div>
 
               {worksList.map((work, idx) => (
                 <div
@@ -388,15 +363,27 @@ export default function DSRForm({
                   className="bg-white rounded-3xl border border-gray-150 shadow-xs overflow-hidden relative group"
                 >
                   {/* Block Header Tab */}
-                  <div className="bg-gray-50/50 px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                  <div className="bg-gray-50/50 px-6 py-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <span className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-700 font-extrabold text-xs flex items-center justify-center">
                         ✓
                       </span>
                       <div>
                         <h4 className="font-bold text-gray-900 text-sm">Domain Work Allocation Block</h4>
-
                       </div>
+                    </div>
+
+                    {/* Date Selection Box Aligned on the Right Side of the same line inside the big block header */}
+                    <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-gray-150 shadow-3xs">
+                      <input
+                        id="reporting-date"
+                        type="date"
+                        required
+                        value={selectedDate}
+                        max={new Date().toISOString().split('T')[0]}
+                        onChange={(e) => setSelectedDate(e.target.value)}
+                        className="px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-lg text-gray-955 font-bold focus:outline-none focus:ring-1 focus:ring-indigo-600 transition text-[11px] cursor-pointer hover:bg-gray-100"
+                      />
                     </div>
                   </div>
 

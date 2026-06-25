@@ -133,6 +133,7 @@ export default function DSRDashboard({
 
   // Project backlinks cell expand state (for clicking on the backlinks count)
   const [expandedProjectStats, setExpandedProjectStats] = useState<Record<string, boolean>>({});
+  const [expandedRankingProjects, setExpandedRankingProjects] = useState<Record<string, boolean>>({});
 
   // Employee lookup details
   const employeeEmailToNameMap = useMemo(() => {
@@ -687,6 +688,7 @@ export default function DSRDashboard({
         lastWorked,
         priority: p.priority,
         frequency: p.frequency,
+        keywords: p.keywords || [],
       };
     });
 
@@ -906,25 +908,11 @@ export default function DSRDashboard({
     }));
   }, [filteredProjectsForMetrics, filteredWorks, unworkedFilter]);
 
-  const keywordStats = useMemo(() => {
-    interface KeywordItem {
-      id: string;
-      projName: string;
-      code: string;
-      priority: string;
-      frequency: string;
-      domain: string;
-      keyword: string;
-      ranking: string;
-      timesWorked: number;
-      lastWorkedDate: string;
-    }
-    
-    const items: KeywordItem[] = [];
-    
-    filteredProjectsForMetrics.forEach((proj) => {
+  const projectKeywordGroups = useMemo(() => {
+    return filteredProjectsForMetrics.map((proj) => {
       const kws = Array.isArray(proj.keywords) ? proj.keywords.filter(Boolean) : [];
-      kws.forEach((kw) => {
+      
+      const keywordItems = kws.map((kw) => {
         let timesWorked = 0;
         let lastWorked = 'Never';
         
@@ -940,36 +928,51 @@ export default function DSRDashboard({
           }
         });
         
-        items.push({
-          id: `${proj.id}-${kw}`,
-          projName: proj.name,
-          code: proj.code || '',
-          priority: proj.priority || '',
-          frequency: proj.frequency ? String(proj.frequency) : '',
-          domain: proj.domain || '',
+        return {
           keyword: kw,
-          ranking: '', // blank for now as requested
+          domain: proj.domain || '',
           timesWorked,
-          lastWorkedDate: lastWorked
-        });
+          ranking: '—',
+          lastWorked
+        };
       });
+
+      // Find last worked / checked date for the project as a whole
+      let lastWorkedDate = 'Never';
+      filteredWorks.forEach((work) => {
+        if (work.projectId === proj.id) {
+          if (lastWorkedDate === 'Never' || work.date > lastWorkedDate) {
+            lastWorkedDate = work.date;
+          }
+        }
+      });
+
+      return {
+        id: proj.id,
+        name: proj.name,
+        domain: proj.domain || '',
+        lastWorkedDate,
+        keywords: keywordItems
+      };
     });
-    
-    return items.map((item, index) => ({
-      ...item,
-      srNo: index + 1
-    }));
   }, [filteredProjectsForMetrics, filteredWorks]);
 
-  const filteredKeywordStats = useMemo(() => {
-    if (!keywordSearchTerm.trim()) return keywordStats;
-    const term = keywordSearchTerm.toLowerCase();
-    return keywordStats.filter(item => 
-      item.keyword.toLowerCase().includes(term) || 
-      item.projName.toLowerCase().includes(term) || 
-      item.domain.toLowerCase().includes(term)
-    ).map((item, idx) => ({ ...item, srNo: idx + 1 }));
-  }, [keywordStats, keywordSearchTerm]);
+  const filteredProjectKeywordGroups = useMemo(() => {
+    let result = projectKeywordGroups;
+    if (keywordSearchTerm.trim()) {
+      const term = keywordSearchTerm.toLowerCase();
+      result = projectKeywordGroups.filter((p) => {
+        const nameMatch = p.name.toLowerCase().includes(term);
+        const domainMatch = p.domain.toLowerCase().includes(term);
+        const keywordMatch = p.keywords.some((kw) => kw.keyword.toLowerCase().includes(term));
+        return nameMatch || domainMatch || keywordMatch;
+      });
+    }
+    return result.map((item, idx) => ({
+      ...item,
+      srNo: idx + 1
+    }));
+  }, [projectKeywordGroups, keywordSearchTerm]);
 
   const toggleProjectStats = (projId: string) => {
     setExpandedProjectStats(prev => ({
@@ -984,7 +987,7 @@ export default function DSRDashboard({
     { id: 'activity' as const, label: isAdmin ? 'Team Activity' : 'Activity', icon: Calendar },
     { id: 'backlinks' as const, label: 'Backlinks', icon: Percent },
     { id: 'unworked_project' as const, label: 'Unworked Projects', icon: FolderOpen },
-    { id: 'keyword_section' as const, label: 'Keywords', icon: Tag }
+    { id: 'keyword_section' as const, label: 'Ranking', icon: Tag }
   ];
 
   return (
@@ -1438,7 +1441,6 @@ export default function DSRDashboard({
                   <tr>
                     <th className="px-4 py-3 w-14">Sr No.</th>
                     <th className="px-4 py-3">Project Name</th>
-                    <th className="px-4 py-3">Domain</th>
                     <th className="px-4 py-3 w-28">Priority</th>
                     <th className="px-4 py-3 w-32 text-center">Times Worked</th>
                     <th className="px-4 py-3 w-36">Last Worked</th>
@@ -1448,20 +1450,25 @@ export default function DSRDashboard({
                 </thead>
                 <tbody className="divide-y divide-gray-150">
                   {projectTableData.map((item) => {
+                    const isExpanded = !!expandedProjectStats[item.id];
                     return (
                       <React.Fragment key={item.id}>
                         {/* Main row */}
-                        <tr className="hover:bg-slate-50/40 transition-colors">
+                        <tr 
+                          onClick={() => toggleProjectStats(item.id)}
+                          className="hover:bg-slate-50/60 transition-colors cursor-pointer select-none"
+                        >
                           <td className="px-4 py-3 font-mono font-bold text-gray-400">{item.srNo}</td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
                               <span className="font-bold text-gray-900">{item.name}</span>
+                              <ChevronDown 
+                                size={14} 
+                                className={`text-gray-400 transition-transform ${
+                                  isExpanded ? 'rotate-180 text-indigo-600 font-black' : ''
+                                }`} 
+                              />
                             </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="font-mono text-gray-500 bg-gray-50 px-2 py-0.5 rounded border border-gray-200">
-                              {item.domain}
-                            </span>
                           </td>
                           <td className="px-4 py-3">
                             {item.priority === 'P1' && (
@@ -1494,14 +1501,14 @@ export default function DSRDashboard({
                             </span>
                           </td>
                           {isAdmin && (
-                            <td className="px-4 py-3">
+                            <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                               <span className="text-gray-950 bg-slate-50 border border-slate-200/50 rounded px-2.5 py-1 text-[10px] select-all font-bold">
                                 {getAssignedUsersForProject(item.id)}
                               </span>
                             </td>
                           )}
                           {isAdmin && (
-                            <td className="px-4 py-3">
+                            <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center gap-1.5">
                                 <select
                                   value={item.priority || ''}
@@ -1523,6 +1530,54 @@ export default function DSRDashboard({
                             </td>
                           )}
                         </tr>
+
+                        {/* Collapsible Dropdown Row with Domain & Keywords */}
+                        {isExpanded && (
+                          <tr className="bg-slate-50/50">
+                            <td colSpan={isAdmin ? 7 : 5} className="px-6 py-4 border-t border-b border-gray-150">
+                              <div className="space-y-4 text-left">
+                                <div className="flex flex-col sm:flex-row sm:items-center gap-4 border-b border-gray-150/40 pb-3">
+                                  <div className="flex items-center gap-1.5 text-gray-500 font-bold text-[11px] uppercase tracking-wider">
+                                    <span>🌐 Domain:</span>
+                                  </div>
+                                  {item.domain ? (
+                                    <a 
+                                      href={item.domain.startsWith('http') ? item.domain : `https://${item.domain}`} 
+                                      target="_blank" 
+                                      rel="noreferrer" 
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="font-mono text-indigo-600 hover:underline text-xs font-bold bg-white border border-gray-200 px-3 py-1 rounded-xl shadow-3xs inline-flex items-center gap-1.5"
+                                    >
+                                      {item.domain}
+                                    </a>
+                                  ) : (
+                                    <span className="text-gray-400 italic text-xs">No Domain Registered</span>
+                                  )}
+                                </div>
+                                
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-1.5 text-gray-500 font-bold text-[11px] uppercase tracking-wider">
+                                    <span>🎯 Target SEO Keywords / Rankings:</span>
+                                  </div>
+                                  {Array.isArray(item.keywords) && item.keywords.length > 0 ? (
+                                    <div className="flex flex-wrap gap-2">
+                                      {item.keywords.map((kw: string) => (
+                                        <span 
+                                          key={kw} 
+                                          className="inline-flex items-center bg-amber-50 text-amber-900 border border-amber-200/50 rounded-xl px-2.5 py-1 text-xs font-extrabold font-mono shadow-3xs"
+                                        >
+                                          {kw}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-400 italic text-xs block">No keywords registered for this project.</span>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
                       </React.Fragment>
                     );
                   })}
@@ -2560,9 +2615,9 @@ export default function DSRDashboard({
           <div>
             <div className="p-4 bg-gray-50/50 border-b border-gray-150 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">Project Keyword Section</h3>
+                <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">Project Ranking Section</h3>
                 <span className="text-[10px] text-gray-400 font-bold uppercase mt-1 block">
-                  Organic SEO keyword performance and daily logged operations
+                  Organic SEO keyword ranking performance and daily logged operations
                 </span>
               </div>
               
@@ -2574,103 +2629,174 @@ export default function DSRDashboard({
                   type="text"
                   value={keywordSearchTerm}
                   onChange={(e) => setKeywordSearchTerm(e.target.value)}
-                  placeholder="Search keywords or domains..."
+                  placeholder="Search projects or keywords..."
                   className="w-full text-xs pl-9 pr-3 py-2 border border-gray-200 rounded-xl focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
                 />
               </div>
             </div>
 
-            {filteredKeywordStats.length === 0 ? (
+            {filteredProjectKeywordGroups.length === 0 ? (
               <div className="p-12 text-center text-xs text-gray-500 font-bold space-y-1 bg-slate-50/40 rounded-b-2xl border-t border-slate-150">
-                <p>No keywords found matching the current workspace and search criteria.</p>
+                <p>No projects found matching the search criteria.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs min-w-[900px] border-collapse">
+                <table className="w-full text-left text-xs min-w-[700px] border-collapse">
                   <thead className="bg-slate-50/55 text-slate-500 font-extrabold text-[10px] uppercase border-b border-gray-150">
                     <tr>
                       <th className="px-4 py-3 w-14 text-center">Sr No.</th>
                       <th className="px-4 py-3">Project Name</th>
-                      <th className="px-4 py-3">Domain</th>
-                      <th className="px-4 py-3">Keyword</th>
-                      <th className="px-4 py-3">Ranking</th>
-                      <th className="px-4 py-3 text-center">Times Worked</th>
-                      <th className="px-4 py-3">Last Worked</th>
+                      <th className="px-4 py-3 w-48">Last Check</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-150">
-                    {filteredKeywordStats.map((item) => (
-                      <tr key={item.id} className="hover:bg-slate-50/40 transition-colors">
-                        {/* Sr No. */}
-                        <td className="px-4 py-3.5 font-mono font-black text-gray-400 text-center">{item.srNo}</td>
-                        
-                        {/* Project Name & Code */}
-                        <td className="px-4 py-3.5">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-gray-900">{item.projName}</span>
-                          </div>
-                        </td>
-
-                        {/* Domain with a link */}
-                        <td className="px-4 py-3.5">
-                          {item.domain ? (
-                            <a 
-                              href={item.domain.startsWith('http') ? item.domain : `https://${item.domain}`} 
-                              target="_blank" 
-                              rel="noreferrer" 
-                              className="font-mono text-indigo-600 hover:underline text-[11px] font-bold bg-indigo-50/25 border border-indigo-100/50 px-2.5 py-0.5 rounded-md inline-flex items-center gap-1"
-                            >
-                              {item.domain}
-                            </a>
-                          ) : (
-                            <span className="text-gray-300 italic text-[10px] font-normal">—</span>
-                          )}
-                        </td>
-
-                        {/* Keyword Name Column */}
-                        <td className="px-4 py-3.5 text-left">
-                          <span className="inline-block bg-amber-50 text-amber-900 font-extrabold px-2.5 py-1 rounded-xl border border-amber-200/50 text-[11px] font-mono shadow-3xs">
-                            {item.keyword}
-                          </span>
-                        </td>
-
-                        {/* Ranking Column (Blank) */}
-                        <td className="px-4 py-3.5 text-left font-mono font-semibold text-gray-400">
-                          —
-                        </td>
-
-                        {/* Times Worked Column */}
-                        <td className="px-4 py-3.5 text-center">
-                          <span className={`inline-flex items-center justify-center font-bold px-2.5 rounded-full text-[10px] h-5 min-w-5 leading-none font-mono ${
-                            item.timesWorked > 0 
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' 
-                              : 'bg-gray-100 text-gray-400'
-                          }`}>
-                            {item.timesWorked}
-                          </span>
-                        </td>
-
-                        {/* Last Worked Column */}
-                        <td className="px-4 py-3.5 text-left">
-                          {(() => {
-                            if (item.lastWorkedDate === 'Never') {
-                              return <span className="text-gray-400 font-bold font-mono">—</span>;
-                            }
+                    {filteredProjectKeywordGroups.map((proj) => {
+                      const isExpanded = !!expandedRankingProjects[proj.id];
+                      return (
+                        <React.Fragment key={proj.id}>
+                          <tr 
+                            onClick={() => {
+                              setExpandedRankingProjects(prev => ({
+                                ...prev,
+                                [proj.id]: !prev[proj.id]
+                              }));
+                            }}
+                            className="hover:bg-slate-50/60 transition-colors cursor-pointer select-none"
+                          >
+                            {/* Sr No. */}
+                            <td className="px-4 py-3.5 font-mono font-black text-gray-400 text-center">{proj.srNo}</td>
                             
-                            try {
-                              const d = new Date(item.lastWorkedDate);
-                              return (
-                                <span className="text-gray-800 font-extrabold font-mono text-xs">
-                                  {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                                </span>
-                              );
-                            } catch {
-                              return <span className="text-gray-800 font-extrabold font-mono text-xs">{item.lastWorkedDate}</span>;
-                            }
-                          })()}
-                        </td>
-                      </tr>
-                    ))}
+                            {/* Project Name */}
+                            <td className="px-4 py-3.5 font-bold text-gray-950">
+                              <div className="flex items-center gap-2">
+                                <ChevronDown 
+                                  size={14} 
+                                  className={`text-gray-400 transition-transform ${
+                                    isExpanded ? 'rotate-180 text-indigo-600 font-black' : ''
+                                  }`} 
+                                />
+                                <span>{proj.name}</span>
+                              </div>
+                            </td>
+
+                            {/* Last Check (Last Worked Date) */}
+                            <td className="px-4 py-3.5">
+                              {(() => {
+                                if (proj.lastWorkedDate === 'Never') {
+                                  return <span className="text-gray-400 font-bold font-mono">—</span>;
+                                }
+                                
+                                try {
+                                  const d = new Date(proj.lastWorkedDate);
+                                  return (
+                                    <span className="text-gray-800 font-extrabold font-mono text-xs">
+                                      {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                    </span>
+                                  );
+                                } catch {
+                                  return <span className="text-gray-800 font-extrabold font-mono text-xs">{proj.lastWorkedDate}</span>;
+                                }
+                              })()}
+                            </td>
+                          </tr>
+
+                          {/* Sub-table Dropdown for Keywords of this project */}
+                          {isExpanded && (
+                            <tr className="bg-slate-50/50">
+                              <td colSpan={3} className="px-6 py-4 border-t border-b border-gray-150">
+                                <div className="space-y-2">
+                                  <div className="text-[10px] uppercase font-black text-gray-450 tracking-wider">
+                                    Keyword Rankings &amp; Search Visibility Details
+                                  </div>
+
+                                  {proj.keywords.length === 0 ? (
+                                    <p className="text-xs text-gray-400 italic">No keywords mapped for this project.</p>
+                                  ) : (
+                                    <div className="overflow-hidden border border-gray-150 rounded-xl bg-white shadow-3xs">
+                                      <table className="w-full text-left text-xs border-collapse">
+                                        <thead className="bg-gray-50 text-[9px] uppercase font-bold text-gray-500 border-b border-gray-150">
+                                          <tr>
+                                            <th className="px-3 py-2">Keyword</th>
+                                            <th className="px-3 py-2">Domain</th>
+                                            <th className="px-3 py-2 text-center w-28">Times Worked</th>
+                                            <th className="px-3 py-2 w-28">Ranking</th>
+                                            <th className="px-3 py-2 w-32">Last Worked</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-150">
+                                          {proj.keywords.map((kwItem) => (
+                                            <tr key={kwItem.keyword} className="hover:bg-slate-50/30 transition-colors">
+                                              {/* Keyword */}
+                                              <td className="px-3 py-2.5 font-semibold text-gray-900">
+                                                <span className="inline-block bg-amber-50 text-amber-900 font-extrabold px-2 py-0.5 rounded border border-amber-100 text-[11px] font-mono shadow-3xs">
+                                                  {kwItem.keyword}
+                                                </span>
+                                              </td>
+
+                                              {/* Domain */}
+                                              <td className="px-3 py-2.5">
+                                                {kwItem.domain ? (
+                                                  <a 
+                                                    href={kwItem.domain.startsWith('http') ? kwItem.domain : `https://${kwItem.domain}`} 
+                                                    target="_blank" 
+                                                    rel="noreferrer" 
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="font-mono text-indigo-600 hover:underline text-[10px] font-bold bg-indigo-50/30 border border-indigo-100/50 px-2 py-0.5 rounded"
+                                                  >
+                                                    {kwItem.domain}
+                                                  </a>
+                                                ) : (
+                                                  <span className="text-gray-300 italic text-[10px]">—</span>
+                                                )}
+                                              </td>
+
+                                              {/* Times Worked */}
+                                              <td className="px-3 py-2.5 text-center">
+                                                <span className={`inline-flex items-center justify-center font-bold px-2 rounded-full text-[10px] h-5 min-w-5 leading-none font-mono ${
+                                                  kwItem.timesWorked > 0 
+                                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' 
+                                                    : 'bg-gray-100 text-gray-400'
+                                                }`}>
+                                                  {kwItem.timesWorked}
+                                                </span>
+                                              </td>
+
+                                              {/* Ranking */}
+                                              <td className="px-3 py-2.5 text-gray-550 font-mono text-xs font-bold">
+                                                {kwItem.ranking}
+                                              </td>
+
+                                              {/* Last Worked */}
+                                              <td className="px-3 py-2.5">
+                                                {(() => {
+                                                  if (kwItem.lastWorked === 'Never') {
+                                                    return <span className="text-gray-400 font-bold font-mono text-[11px]">—</span>;
+                                                  }
+                                                  try {
+                                                    const d = new Date(kwItem.lastWorked);
+                                                    return (
+                                                      <span className="text-gray-800 font-extrabold font-mono text-[11px]">
+                                                        {d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                      </span>
+                                                    );
+                                                  } catch {
+                                                    return <span className="text-gray-800 font-extrabold font-mono text-[11px]">{kwItem.lastWorked}</span>;
+                                                  }
+                                                })()}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

@@ -106,6 +106,7 @@ export default function DSRSettings({
   const [newAdminEmail, setNewAdminEmail] = useState('');
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
+  const [selectedUserEmail, setSelectedUserEmail] = useState('');
 
   const [serviceAccountEmail, setServiceAccountEmail] = useState('');
   const [serviceAccountConfigured, setServiceAccountConfigured] = useState(false);
@@ -238,28 +239,6 @@ export default function DSRSettings({
           Assign Project
         </button>
       </div>
-
-      {serviceAccountEmail && (
-        <div className="bg-slate-50 border border-gray-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-0.5 text-left">
-            <h4 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
-              🟢 Google Sheets Active Backend Integration
-            </h4>
-            <p className="text-[11px] text-gray-500">
-              The application automatically syncs and persists database logs to Google Sheets. Share your spreadsheet with this Service Account:
-            </p>
-            <span className="font-mono text-[10px] text-indigo-600 block mt-1 font-bold select-all bg-white px-2 py-1 rounded inline-block border border-gray-150">
-              {serviceAccountEmail}
-            </span>
-          </div>
-          <button
-            onClick={handleCopyEmail}
-            className="px-4 py-2 bg-white hover:bg-slate-50 text-indigo-600 hover:text-indigo-800 border border-gray-200 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer w-fit shrink-0 shadow-3xs"
-          >
-            {isCopied ? <span className="text-emerald-600 font-bold">Copied Email!</span> : <>Copy Service Email</>}
-          </button>
-        </div>
-      )}
 
       {/* Sub-Alert status notifications */}
       {statusMsg && (
@@ -448,19 +427,22 @@ export default function DSRSettings({
                     onAddAlert(payload);
                     triggerAlert('success', `Direct task request dispatched for ${email} on date ${date}!`);
                     form.reset();
+                    setSelectedUserEmail('');
                   }}
                   className="space-y-4"
                 >
                   <div className="space-y-1.5">
-                    <label className="text-[10px] text-gray-500 font-bold block uppercase">Reporter Email</label>
+                    <label className="text-[10px] text-gray-500 font-bold block uppercase">Reporter User ID</label>
                     <select
                       name="userEmail"
                       required
+                      value={selectedUserEmail}
+                      onChange={(e) => setSelectedUserEmail(e.target.value)}
                       className="w-full px-3 py-2 bg-white border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 focus:outline-none"
                     >
                       <option value="">- Select Human Reporter -</option>
                       {allowedUsers.map(u => (
-                        <option key={u.email} value={u.email}>{u.name} ({u.email})</option>
+                        <option key={u.email} value={u.email}>{u.name} (ID: {u.email})</option>
                       ))}
                     </select>
                   </div>
@@ -473,9 +455,19 @@ export default function DSRSettings({
                       className="w-full px-3 py-2 bg-white border border-gray-200 rounded text-xs focus:ring-1 focus:ring-indigo-500 text-gray-900 focus:outline-none"
                     >
                       <option value="">- Select Active Project -</option>
-                      {projects.map(p => (
-                        <option key={p.id} value={p.id}>{p.name} ({p.domain || 'no domain'})</option>
-                      ))}
+                      {(() => {
+                        const filtered = selectedUserEmail
+                          ? projects.filter((p) => {
+                              const assigned = Array.isArray(p.users) ? p.users : [];
+                              const matchesUsers = assigned.some((u: string) => u.trim().toLowerCase() === selectedUserEmail.trim().toLowerCase());
+                              const matchesUserId = p.userId && String(p.userId).trim().toLowerCase() === selectedUserEmail.trim().toLowerCase();
+                              return matchesUsers || matchesUserId;
+                            })
+                          : projects;
+                        return filtered.map(p => (
+                          <option key={p.id} value={p.id}>{p.name} ({p.domain || 'no domain'})</option>
+                        ));
+                      })()}
                     </select>
                   </div>
 

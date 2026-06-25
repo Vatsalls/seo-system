@@ -25,30 +25,50 @@ export async function fetchProjectsFromSheet(
   token: string
 ): Promise<Project[]> {
   const cleanId = extractSpreadsheetId(spreadsheetId);
-  const range = encodeURIComponent(`${sheetName}!A1:Z1000`);
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${range}`;
+  const candidates = Array.from(new Set([
+    sheetName,
+    "sheet1",
+    "Sheet1",
+    "Projects_Mapping"
+  ].filter(Boolean)));
+
+  let lastError: Error | null = null;
+  let rows: string[][] = [];
+  let successfulTab = '';
+
+  for (const candidate of candidates) {
+    const range = encodeURIComponent(`${candidate}!A1:Z1000`);
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${range}`;
+
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.values && data.values.length > 0) {
+          rows = data.values;
+          successfulTab = candidate;
+          break;
+        }
+      } else {
+        const errBody = await res.text();
+        lastError = new Error(`Google Sheets returned ${res.status}: ${errBody}`);
+      }
+    } catch (err: any) {
+      lastError = err;
+    }
+  }
 
   try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!res.ok) {
-      const errBody = await res.text();
-      console.error('Failed to fetch projects from Sheet:', errBody);
-      throw new Error(`Google Sheets returned ${res.status}: ${res.statusText}`);
-    }
-
-    const data = await res.json();
-    const rows: string[][] = data.values || [];
-    
     if (rows.length === 0) {
       // Auto-initialize headers if the sheet is completely empty
-      await initSheetHeaders(cleanId, sheetName, ['Project Name', 'Domain', 'Location', 'Region', 'Users', 'Keyword1', 'Keyword2', 'Keyword3', 'Keyword4', 'Keyword5', 'Keyword6', 'Keyword7', 'Keyword8'], token);
+      await initSheetHeaders(cleanId, sheetName || 'sheet1', ['Project Name', 'Domain', 'Location', 'Region', 'Users', 'Keyword1', 'Keyword2', 'Keyword3', 'Keyword4', 'Keyword5', 'Keyword6', 'Keyword7', 'Keyword8'], token);
       return [];
     }
 

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Project, DSREntry, ProjectWork, CustomSubmissionType, AppUser, ProjectLocation } from './types';
 import {
   DEFAULT_PROJECTS,
@@ -17,7 +17,7 @@ import DSRDashboard from './components/DSRDashboard';
 import DSRSettings from './components/DSRSettings';
 import LoginScreen from './components/LoginScreen';
 import { initAuth, googleSignIn, getAccessToken, logout } from './lib/firebase';
-import { getUserDisplayName } from './lib/userUtils';
+import { getUserDisplayName, registerNamesFromProjects } from './lib/userUtils';
 import {
   fetchProjectsFromSheet,
   fetchSubmissionsFromSheet,
@@ -37,7 +37,8 @@ import {
   HardDriveUpload,
   UserCheck,
   Bell,
-  RefreshCw
+  RefreshCw,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -138,7 +139,7 @@ export default function App() {
           projectsSpreadsheetId: parsed.projectsSpreadsheetId || parsed.spreadsheetId || '',
           logsSpreadsheetId: parsed.logsSpreadsheetId || parsed.spreadsheetId || '',
           spreadsheetId: parsed.spreadsheetId || '',
-          projectsTab: parsed.projectsTab || 'Projects_Mapping',
+          projectsTab: parsed.projectsTab || 'sheet1',
           submissionsTab: parsed.submissionsTab || 'DSR_Logs',
           locationsTab: parsed.locationsTab || 'Locations',
           isConnected: !!parsed.isConnected
@@ -151,7 +152,7 @@ export default function App() {
       projectsSpreadsheetId: '',
       logsSpreadsheetId: '',
       spreadsheetId: '',
-      projectsTab: 'Projects_Mapping',
+      projectsTab: 'sheet1',
       submissionsTab: 'DSR_Logs',
       locationsTab: 'Locations',
       isConnected: false
@@ -173,6 +174,24 @@ export default function App() {
 
   const [showNotifications, setShowNotifications] = useState(false);
   const [assignmentPreFill, setAssignmentPreFill] = useState<{ projectId: string; date: string } | null>(null);
+
+  const notificationsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        showNotifications &&
+        notificationsRef.current &&
+        !notificationsRef.current.contains(event.target as Node)
+      ) {
+        setShowNotifications(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showNotifications]);
 
   useEffect(() => {
     localStorage.setItem('dsr_admin_alerts', JSON.stringify(alerts));
@@ -329,7 +348,9 @@ export default function App() {
               const emailLower = currentUserEmail.trim().toLowerCase();
               finalProjects = loadedProjects.filter((p: any) => {
                 const assigned = Array.isArray(p.users) ? p.users : [];
-                return assigned.some((u: string) => u.trim().toLowerCase() === emailLower);
+                const matchesUsers = assigned.some((u: string) => u.trim().toLowerCase() === emailLower);
+                const matchesUserId = p.userId && String(p.userId).trim().toLowerCase() === emailLower;
+                return matchesUsers || matchesUserId;
               });
             }
             setProjects(finalProjects);
@@ -513,6 +534,9 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('dsr_projects', JSON.stringify(projects));
+    if (projects && projects.length > 0) {
+      registerNamesFromProjects(projects);
+    }
     const dynamicUsers = mapUsersFromProjects(projects);
     setAllowedUsers(dynamicUsers);
   }, [projects]);
@@ -559,7 +583,10 @@ export default function App() {
     const emailLower = currentUserEmail.trim().toLowerCase();
 
     return projects.filter((p) => {
-      return p.userId && String(p.userId).trim().toLowerCase() === emailLower;
+      const assigned = Array.isArray(p.users) ? p.users : [];
+      const matchesUsers = assigned.some((u: string) => u.trim().toLowerCase() === emailLower);
+      const matchesUserId = p.userId && String(p.userId).trim().toLowerCase() === emailLower;
+      return matchesUsers || matchesUserId;
     });
   }, [projects, currentUserEmail, isAdmin]);
   
@@ -586,11 +613,31 @@ export default function App() {
     });
   }, [alerts, entries, currentUserEmail]);
 
-  // Filter alerts by role: admins see user notes and admin notes, users only see admin notes
-  const visibleAlerts = alerts.filter(alert => {
-    const isUserMsg = alert.alertType === 'user_message';
-    return isAdmin ? true : !isUserMsg;
-  });
+  // Filter alerts by role: admins see user notes and admin notes, users only see admin notes.
+  // Assignment alerts are automatically filtered out for the user if they are already fulfilled.
+  const visibleAlerts = useMemo(() => {
+    if (!currentUserEmail) return [];
+    const lowerCurrent = currentUserEmail.trim().toLowerCase();
+    
+    return alerts.filter(alert => {
+      if (alert.alertType === 'project_assignment') {
+        const lowerEmail = (alert.userEmail || '').trim().toLowerCase();
+        if (lowerEmail !== lowerCurrent) return false;
+        
+        const isFulfilled = entries.some(entry => {
+          const entryUserLower = (entry.userEmail || '').trim().toLowerCase();
+          const matchesUser = entryUserLower === lowerCurrent;
+          const matchesDate = entry.date === alert.date;
+          const hasProject = (entry.works || []).some(w => String(w.projectId) === String(alert.projectId));
+          return matchesUser && matchesDate && hasProject;
+        });
+        return !isFulfilled;
+      }
+      
+      const isUserMsg = alert.alertType === 'user_message';
+      return isAdmin ? true : !isUserMsg;
+    });
+  }, [alerts, entries, currentUserEmail, isAdmin]);
 
   const unreadCount = visibleAlerts.filter(a => !a.read).length;
   const [filteredLogsCount, setFilteredLogsCount] = useState<number | null>(null);
@@ -618,9 +665,10 @@ export default function App() {
       } else {
         const validIds = ["1859", "9531", "5595", "4001"];
         const isAllowedUser = validIds.includes(emailLower) || 
-                             allowedUsers.some((u) => u.email.trim().toLowerCase() === emailLower);
+                             allowedUsers.some((u) => u.email.trim().toLowerCase() === emailLower) ||
+                             projects.some((p) => p.userId && String(p.userId).trim().toLowerCase() === emailLower);
         if (!isAllowedUser) {
-          throw new Error(`Access Denied: The ID/Email "${emailLower}" is not authorized.`);
+          throw new Error(`Access Denied: The ID "${emailLower}" is not authorized.`);
         }
 
         const nowStr = new Date().toLocaleString('en-US', {
@@ -769,7 +817,7 @@ export default function App() {
     const newEntry: DSREntry = {
       id: `dsr-${Date.now()}`,
       date,
-      userEmail: resolvedName, // Store under the resolved employee name so local logs display it
+      userEmail: currentUserEmail, // Store under the actual unique user email/ID
       works: worksWithIds,
       createdAt: new Date().toISOString(),
     };
@@ -791,7 +839,7 @@ export default function App() {
             sheetName,
             worksData,
             date,
-            resolvedName, // write resolved name to GSheet
+            currentUserEmail, // write actual unique user email/ID to GSheet
             token
           );
           console.log("Direct client append succeeded!");
@@ -824,7 +872,7 @@ export default function App() {
         body: JSON.stringify({
           works: worksData,
           date,
-          userEmail: resolvedName, // Pass resolved name to backend
+          userEmail: currentUserEmail, // Pass actual unique user email/ID to backend
         }),
       });
       await syncWithBackend().catch((e) => console.warn(e));
@@ -1007,7 +1055,7 @@ export default function App() {
                 }`}
               >
                 <LayoutGrid size={14} />
-                Overview
+                Overview Panel
               </button>
 
               {isAdmin && (
@@ -1029,13 +1077,13 @@ export default function App() {
             {/* Right Side: Account Actions & Logouts */}
             <div className="flex items-center gap-3">
               {/* Notifications Bell */}
-              <div className="relative">
+              <div className="relative" ref={notificationsRef}>
                 <button
                   onClick={() => setShowNotifications(!showNotifications)}
                   className={`p-2 border border-gray-150 hover:bg-slate-50 text-gray-500 hover:text-indigo-600 rounded-xl transition cursor-pointer relative ${showNotifications ? 'bg-indigo-50/50 text-indigo-600 border-indigo-200' : ''}`}
                   title="Notifications & Alerts"
                 >
-                  <Bell size={15} />
+                  <Bell size={20} />
                   {unreadCount > 0 && (
                     <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-black text-white ring-2 ring-white">
                       {unreadCount}
@@ -1044,64 +1092,86 @@ export default function App() {
                 </button>
 
                 {showNotifications && (
-                  <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-150 rounded-2xl shadow-lg py-3 z-50 animate-fade-in divide-y divide-gray-100 max-h-[400px] overflow-y-auto">
-                    <div className="px-4 pb-2 flex justify-between items-center">
-                      <span className="font-extrabold text-xs text-gray-900 uppercase tracking-wider flex items-center gap-1.5 font-sans">
-                        <Bell size={12} className="text-indigo-600" />
-                        Admin Alerts
+                  <div className="absolute right-0 mt-2 sm:w-[460px] w-80 bg-white border border-gray-150 rounded-2xl shadow-xl py-4 z-50 animate-fade-in divide-y divide-gray-100 max-h-[500px] overflow-y-auto">
+                    <div className="px-5 pb-3 flex justify-between items-center">
+                      <span className="font-extrabold text-sm text-gray-900 uppercase tracking-wider flex items-center gap-1.5 font-sans">
+                        <Bell size={16} className="text-indigo-600 animate-pulse" />
+                        Admin Alerts &amp; Tasks
                       </span>
-                      {unreadCount > 0 && (
-                        <button
-                          onClick={handleMarkAllAlertsAsRead}
-                          className="text-[10px] text-indigo-600 hover:underline font-extrabold uppercase font-sans"
-                        >
-                          Mark all read
-                        </button>
-                      )}
+                      <button
+                        onClick={() => setShowNotifications(false)}
+                        className="p-1 hover:bg-gray-100 text-gray-400 hover:text-rose-600 rounded-lg transition"
+                        title="Close Notifications"
+                      >
+                        <X size={16} />
+                      </button>
                     </div>
 
-                    <div className="py-1">
+                    <div className="py-2 divide-y divide-gray-100">
                       {visibleAlerts.length === 0 ? (
-                        <div className="px-4 py-6 text-center text-xs text-gray-400 font-medium font-mono italic">
+                        <div className="px-5 py-8 text-center text-xs text-gray-400 font-medium font-mono italic">
                           No alerts or messages logged here yet.
                         </div>
                       ) : (
                         visibleAlerts.map((alert) => {
                           const isUserMsg = alert.alertType === 'user_message';
+                          const isAssignment = alert.alertType === 'project_assignment';
                           return (
                             <div
                               key={alert.id}
-                              className={`px-4 py-3 text-left relative hover:bg-slate-50/50 transition-colors ${!alert.read ? 'bg-indigo-50/10 font-bold' : ''}`}
+                              className={`px-5 py-4 text-left relative hover:bg-slate-50/50 transition-colors ${!alert.read ? 'bg-indigo-50/15 font-bold' : ''}`}
                             >
-                              <div className="flex justify-between items-start gap-2">
-                                <div>
+                              <div className="flex justify-between items-start gap-3">
+                                <div className="space-y-1">
                                   {isUserMsg ? (
-                                    <span className="inline-block bg-emerald-50 text-emerald-800 font-black px-1.5 py-0.5 rounded text-[8px] uppercase tracking-wider mb-1 border border-emerald-100">
+                                    <span className="inline-block bg-emerald-50 text-emerald-800 font-black px-2 py-0.5 rounded-lg text-[9px] uppercase tracking-wider border border-emerald-100 shadow-3xs">
                                       📬 User Note
                                     </span>
                                   ) : (
-                                    <span className="inline-block bg-indigo-50 text-indigo-700 font-black px-1.5 py-0.5 rounded text-[8px] uppercase tracking-wider mb-1">
-                                      {alert.projectName}
-                                    </span>
-                                  )}
-                                  {alert.projectDomain && (
-                                    <span className="text-[8px] text-gray-405 font-medium ml-1">
-                                      {isUserMsg ? `from ${alert.projectDomain}` : `(${alert.projectDomain})`}
+                                    <span className="inline-block bg-amber-50 text-amber-900 font-black px-2.5 py-0.5 rounded-lg text-[10px] uppercase tracking-wider border border-amber-200 shadow-3xs">
+                                      Action Required: {alert.projectName}
                                     </span>
                                   )}
                                 </div>
-                                <button
-                                  onClick={() => handleClearAlert(alert.id)}
-                                  className="text-gray-400 hover:text-rose-600 text-[12px] p-0.5 leading-none font-bold"
-                                  title="Dismiss Alert"
-                                >
-                                  &times;
-                                </button>
+                                {!isAssignment && (
+                                  <button
+                                    onClick={() => handleClearAlert(alert.id)}
+                                    className="text-gray-400 hover:text-rose-600 text-lg p-0.5 leading-none font-bold"
+                                    title="Dismiss Alert"
+                                  >
+                                    &times;
+                                  </button>
+                                )}
                               </div>
-                              <p className="text-[11px] font-semibold text-gray-750 leading-relaxed mt-1 whitespace-pre-wrap">
-                                {alert.message}
-                              </p>
-                              <div className="flex justify-between items-center mt-2 text-[8px] text-gray-405 font-bold font-mono uppercase">
+
+                              <div className="mt-2 space-y-3">
+                                <p className="text-xs font-bold text-gray-800 leading-relaxed whitespace-pre-wrap bg-slate-50/50 p-3 rounded-xl border border-gray-100">
+                                  {alert.message}
+                                </p>
+
+                                {isAssignment && (
+                                  <div className="flex items-center justify-between gap-4 pt-1">
+                                    <span className="text-[9px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2 py-0.5 font-bold font-mono uppercase">
+                                      Due: {alert.date}
+                                    </span>
+                                    <button
+                                      onClick={() => {
+                                        setAssignmentPreFill({
+                                          projectId: alert.projectId,
+                                          date: alert.date
+                                        });
+                                        setActiveTab('submit');
+                                        setShowNotifications(false);
+                                      }}
+                                      className="whitespace-nowrap px-4 py-1.5 bg-amber-600 hover:bg-amber-700 hover:scale-[1.01] active:scale-[0.99] text-white font-extrabold rounded-lg text-[11px] transition duration-75 shadow-3xs cursor-pointer inline-flex items-center gap-1"
+                                    >
+                                      👉 Update on log
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex justify-between items-center mt-3 text-[9px] text-gray-400 font-bold font-mono uppercase border-t border-gray-100/50 pt-2">
                                 <span>{isUserMsg ? `Sender: ${alert.adminEmail}` : `By ${alert.adminEmail}`}</span>
                                 <span>{new Date(alert.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                               </div>
@@ -1162,11 +1232,11 @@ export default function App() {
                 <div className="flex items-start gap-3">
                   <span className="text-xl shrink-0 mt-0.5">🚨</span>
                   <div className="text-left">
-                    <h4 className="font-extrabold text-[10px] text-amber-800 uppercase tracking-wider">
-                      Required Action: Log Assigned Task
+                    <h4 className="font-extrabold text-sm text-amber-900 tracking-tight">
+                      Action Required: {alert.projectName} {alert.projectDomain ? `(${alert.projectDomain})` : ''}
                     </h4>
                     <p className="text-xs text-amber-950 font-bold mt-1">
-                      Please submit a Work Log for project <span className="underline decoration-amber-600 decoration-2">{alert.projectName} ({alert.projectDomain})</span> assigned for the target date <span className="font-mono text-amber-900 bg-amber-100 border border-amber-250 px-1.5 py-0.5 rounded font-black">{alert.date}</span>.
+                      Work on this project for <span className="font-mono text-amber-900 bg-amber-100 border border-amber-250 px-1.5 py-0.5 rounded font-black">{alert.date}</span>
                     </p>
                     {alert.message && alert.message !== `Admin has requested that you submit a Work Log for ${alert.projectName} for the reporting date of ${alert.date}.` && (
                       <p className="text-[11px] text-amber-700 font-semibold italic mt-0.5">
@@ -1187,7 +1257,7 @@ export default function App() {
                     }}
                     className="whitespace-nowrap px-4 py-2 bg-amber-600 hover:bg-amber-700 hover:scale-[1.01] active:scale-[0.99] text-white font-extrabold rounded-xl text-xs transition duration-75 shadow-xs cursor-pointer"
                   >
-                    👉 Fill Work Log
+                    👉 Update on log
                   </button>
                 </div>
               </div>

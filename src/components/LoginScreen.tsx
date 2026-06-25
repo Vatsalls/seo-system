@@ -148,8 +148,6 @@ export default function LoginScreen({
           <span className="flex items-center gap-1">
             <ShieldAlert size={12} /> Secure login session
           </span>
-          <span>•</span>
-          <span>Google Sheets Backend active</span>
         </div>
       </motion.div>
     </div>

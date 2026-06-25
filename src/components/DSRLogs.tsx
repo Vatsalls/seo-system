@@ -393,36 +393,7 @@ export default function DSRLogs({
 
   return (
     <div className="space-y-6">
-      {/* Tab Switcher for DSR logs vs System Activity Logs */}
-      <div className="flex border-b border-gray-150 gap-2 overflow-x-auto pb-px">
-        <button
-          onClick={() => setActiveLogTab('submissions')}
-          className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-xs cursor-pointer transition ${
-            activeLogTab === 'submissions'
-              ? 'border-indigo-600 text-indigo-700'
-              : 'border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-200'
-          }`}
-        >
-          <Layers size={14} />
-          Daily Task Submissions
-        </button>
-
-        <button
-          onClick={() => setActiveLogTab('activities')}
-          className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-xs cursor-pointer transition ${
-            activeLogTab === 'activities'
-              ? 'border-indigo-600 text-indigo-700'
-              : 'border-transparent text-gray-400 hover:text-gray-700 hover:border-gray-200'
-          }`}
-        >
-          <Activity size={14} />
-          System Activities & Audits
-        </button>
-      </div>
-
-      {activeLogTab === 'submissions' ? (
-        <>
-          {/* Search & Parameters panel */}
+      {/* Search & Parameters panel */}
           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -442,7 +413,7 @@ export default function DSRLogs({
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
             <input
               type="text"
-              placeholder="Search everything (email, project, blog)..."
+              placeholder="Search everything (user id, project, blog)..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-950 focus:outline-none focus:ring-1 focus:ring-indigo-550 transition h-[40px]"
@@ -908,111 +879,6 @@ export default function DSRLogs({
                 </div>
               );
             })}
-          </div>
-        </div>
-      )}
-      </>
-      ) : (
-        <div className="space-y-6">
-          {/* Activity Parameter Search Panel */}
-          <div className="bg-white p-6 rounded-2xl border border-gray-150/65 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex-1 max-w-sm relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-              <input
-                type="text"
-                placeholder="Search activity records (email, action, details)..."
-                value={activitySearchTerm}
-                onChange={(e) => setActivitySearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-955 focus:outline-none focus:ring-1 focus:ring-indigo-550 transition h-[40px]"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleFetchActivities}
-                disabled={isLoadingActivities}
-                className="px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
-              >
-                <RefreshCw size={12} className={isLoadingActivities ? "animate-spin" : ""} />
-                Force Sync & Refresh
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-3xl border border-gray-150/60 shadow-xs overflow-hidden p-6 sm:p-8">
-            <div className="border-b border-gray-100 pb-4 mb-6 flex flex-col sm:flex-row justify-between sm:items-center gap-2 text-left">
-              <div>
-                <h4 className="font-extrabold text-gray-900 text-sm flex items-center gap-2">
-                  <ShieldCheck className="text-indigo-600 font-bold" size={16} />
-                  Security Activity Log & Audit Trail
-                </h4>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Live audit trail showing user logins, notes, assignments, and sheet modifications synchronised directly with your Google Sheets database.
-                </p>
-              </div>
-              <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2.5 py-1 rounded-full border border-slate-200/50">
-                {filteredActivities.length} logs cached
-              </span>
-            </div>
-
-            {isLoadingActivities && activitiesList.length === 0 ? (
-              <div className="py-16 text-center space-y-3">
-                <RefreshCw size={24} className="animate-spin text-indigo-500 mx-auto" />
-                <span className="text-xs text-gray-400 font-bold block">Synchronising live logs from your Google Spreadsheet...</span>
-              </div>
-            ) : filteredActivities.length === 0 ? (
-              <div className="py-16 text-center text-gray-400 italic text-xs">
-                No system activity log matching search criteria found. Log in or create a status note to start.
-              </div>
-            ) : (
-              <div className="relative pl-6 border-l border-indigo-100 space-y-8 select-none">
-                {(() => {
-                  return filteredActivities.map((act) => {
-                    const eventType = act.eventType || '';
-                    let badgeClass = 'bg-gray-105 text-gray-800';
-                    if (eventType.includes('Login') || eventType.toLowerCase().includes('login')) badgeClass = 'bg-emerald-50 text-emerald-700 border border-emerald-100';
-                    else if (eventType.includes('CREATE') || eventType === 'DSR Submission' || eventType.toLowerCase().includes('submission')) badgeClass = 'bg-indigo-50 text-indigo-700 border border-indigo-100';
-                    else if (eventType.includes('EDIT')) badgeClass = 'bg-amber-50 text-amber-700 border border-amber-100';
-                    else if (eventType.includes('DELETE')) badgeClass = 'bg-rose-50 text-rose-700 border border-rose-105';
-                    else if (eventType.includes('Note') || eventType.includes('Alert')) badgeClass = 'bg-purple-50 text-purple-700 border border-purple-100';
-
-                    const humanName = employeeNamesMap[act.userEmail?.toLowerCase()] || act.userEmail;
-
-                    return (
-                      <div key={act.id} className="relative group text-left">
-                        {/* Bullet element */}
-                        <div className="absolute -left-[31px] top-1 bg-white border-2 border-indigo-550 rounded-full w-[11px] h-[11px] group-hover:scale-130 transition-transform duration-150" />
-
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-                          <div className="flex items-center flex-wrap gap-2">
-                            <span className="font-extrabold text-[12px] text-gray-900">{humanName}</span>
-                            <span className="text-[10px] text-gray-400 font-mono">({act.userEmail})</span>
-                            <span className={`text-[9px] font-black tracking-wider uppercase px-2 py-0.5 rounded-full ${badgeClass}`}>
-                              {eventType}
-                            </span>
-                          </div>
-                          
-                          <span className="text-[10px] font-medium text-gray-400 font-mono shrink-0">
-                            {new Date(act.timestamp).toLocaleString(undefined, {
-                              year: 'numeric',
-                              month: 'short',
-                              day: '2-digit',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              second: '2-digit'
-                            })}
-                          </span>
-                        </div>
-
-                        <p className="text-xs text-gray-600 mt-1 font-semibold pl-0.5 leading-relaxed">
-                          {act.details}
-                        </p>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-            )}
           </div>
         </div>
       )}
