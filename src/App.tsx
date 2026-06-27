@@ -1034,15 +1034,13 @@ export default function App() {
                                     </span>
                                   )}
                                 </div>
-                                {!isAssignment && (
-                                  <button
-                                    onClick={() => handleClearAlert(alert.id)}
-                                    className="text-gray-400 hover:text-rose-600 text-lg p-0.5 leading-none font-bold"
-                                    title="Dismiss Alert"
-                                  >
-                                    &times;
-                                  </button>
-                                )}
+                                <button
+                                  onClick={() => handleClearAlert(alert.id)}
+                                  className="text-gray-400 hover:text-rose-600 text-lg p-0.5 leading-none font-bold"
+                                  title="Dismiss Alert"
+                                >
+                                  &times;
+                                </button>
                               </div>
 
                               <div className="mt-2 space-y-3">

@@ -589,6 +589,7 @@ export default function DSRSettings({
                           <th className="px-4 py-3">Date</th>
                           <th className="px-4 py-3">Logged?</th>
                           <th className="px-4 py-3 text-center">Status</th>
+                          <th className="px-4 py-3 text-right">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
@@ -597,7 +598,7 @@ export default function DSRSettings({
                           if (assignmentAlertsList.length === 0) {
                             return (
                               <tr>
-                                <td colSpan={isDeleteMode ? 6 : 5} className="px-4 py-8 text-center text-gray-400 italic">
+                                <td colSpan={isDeleteMode ? 7 : 6} className="px-4 py-8 text-center text-gray-400 italic">
                                   No direct assignments have been registered yet.
                                 </td>
                               </tr>
@@ -666,6 +667,22 @@ export default function DSRSettings({
                                   ) : (
                                     <span className="text-[10px] font-black text-amber-600 animate-pulse tracking-wider">ACTIVE BANNER</span>
                                   )}
+                                </td>
+                                <td className="px-4 py-3.5 text-right">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (window.confirm("Are you sure you want to delete this assignment task?")) {
+                                        if (onClearMultipleAlerts) {
+                                          onClearMultipleAlerts([asg.id]);
+                                        }
+                                      }
+                                    }}
+                                    className="p-1.5 text-gray-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition cursor-pointer inline-flex items-center"
+                                    title="Delete Assignment"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
                                 </td>
                               </tr>
                             );
